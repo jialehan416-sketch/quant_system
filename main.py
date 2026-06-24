@@ -3,6 +3,7 @@ import os
 from src.data_fetcher import fetch_daily_data
 from src.data_processor import clean_and_format, save_to_csv
 from src.data_strategy import calculate_indicators, generate_signals
+from src.data_backtester import run_backtest, print_performance_summary
 DATA_DIR = "data"
 def get_user_config():
     #交互方式获取用户输入的API Key和股票代码，并进行基本的输入验证和清洗
@@ -44,21 +45,31 @@ def main():
         if raw_data is None:
             print(f"股票 {symbol} 数据获取失败，跳过...")
             continue
+        #清洗并对齐格式
         df_cleaned = clean_and_format(raw_data)
-
+        
+        #计算技术指标 (5日与10日均线)
         print (f"正在计算 {symbol} 的 5日 与 10日 移动平均线...") #计算双均线技术指标
         df_with_indicators = calculate_indicators(df_cleaned, short_window=5, long_window=10)
 
         print(f"正在捕捉 {symbol} 的金叉死叉状态切换，生成交易信号...")
         df_with_signals = generate_signals(df_with_indicators) #基于指标，一阶差分自发生成交易信号
 
-        save_to_csv(df_with_signals, symbol, output_dir=DATA_DIR)
+        print(f"正在启动向量化回测引擎，清算 {symbol} 历史账本...")
+        df_backtested = run_backtest(df_with_signals, initial_capital=100000.0)
+
+        #控制台战报输出
+        print_performance_summary(df_backtested)
+
+        #全量数字资产矩阵落盘 (CSV 账本)
+        save_to_csv(df_backtested, symbol, output_dir=DATA_DIR)
+
         if index < total_stocks - 1:
             wait_seconds = 15
             print(f"触发 API 保护机制，强制休眠 {wait_seconds} 秒以防止限流封禁...")
             time.sleep(wait_seconds)
     print("-" * 50)
-    print("日频行情均已准备就绪。")
+    print("【全线大捷】所有目标股票回测清算完毕！请前往 data/ 文件夹查看最终资产曲线账本")
 
 if __name__ == "__main__":
     main()
