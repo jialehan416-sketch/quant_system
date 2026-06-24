@@ -12,7 +12,7 @@ def fetch_daily_data(symbol: str, api_key: str) -> Optional[dict]:
     try: #使用requests库的get方法发送HTTP GET请求，获取API返回的数据，并设置请求超时时间为15秒
         response = requests.get(url, params=params, timeout=15)
         if response.status_code != 200:
-            print(f"请求{symbol}失败，HTTP状态码：{response.status_code}")
+            print(f"请求{symbol}失败,HTTPS状态: {response.status_code}")
             return None
         
         data = response.json()  #将API返回的JSON数据解析为Python字典

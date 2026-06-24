@@ -4,8 +4,8 @@ import pandas as pd
 def plot_equity_curve(df: pd.DataFrame, symbol: str, output_dir: str = "reports") -> None:
     """
     绘制双子图工业级量化看板：
-    1. 上图：账户绝对资产净值曲线（Portfolio Value）
-    2. 下图：策略累计收益率 vs 大盘基准累计收益率（%）
+    1. 上图: 账户绝对资产净值曲线(Portfolio Value)
+    2. 下图：策略累计收益率 vs 大盘基准累计收益率(%)
     """
     if df is None or df.empty:
         print(f"⚠️ [可视化] {symbol} 数据为空，取消图表绘制。")
@@ -19,9 +19,9 @@ def plot_equity_curve(df: pd.DataFrame, symbol: str, output_dir: str = "reports"
         df.index = pd.to_datetime(df.index)
         
     # 设置经典的量化美化风格
-    plt.rcParams['font.sans-serif'] = ['Arial', 'SimHei', 'DejaVu Sans'] # 兼容多系统字体
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'STHeiti', 'Arial', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False # 解决负号显示为方块的问题
-    
+
     # 创建双子图画布 (sharex=True 保证上下两个图的时间轴完全对齐)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 9), sharex=True, gridspec_kw={'height_ratios': [1.2, 1]})
     

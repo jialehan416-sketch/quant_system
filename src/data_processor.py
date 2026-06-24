@@ -33,7 +33,7 @@ def clean_and_format(raw_data: Optional[dict]) -> pd.DataFrame:
     # 按照日期进行升序排序（从历史走到今天）
     df.sort_index(ascending=True, inplace=True)
     
-    print("📊 [数据清洗] 基础行情行情数据清洗和格式化完成。")
+    print("[数据清洗] 基础行情行情数据清洗和格式化完成。")
     return df
 
 def save_to_csv(df: pd.DataFrame, symbol: str, output_dir: str = "data") -> None:
@@ -41,7 +41,7 @@ def save_to_csv(df: pd.DataFrame, symbol: str, output_dir: str = "data") -> None
     动态全量数据落盘函数：自动保留内存中所有新增的指标列、信号列与回测账本列
     """
     if df is None or df.empty:
-        print(f"⚠️ [数据存储] {symbol} 数据为空，取消保存。")
+        print(f"[数据存储] {symbol} 数据为空，取消保存。")
         return
         
     # 自动创建文件夹（如果本地没有 'data' 文件夹，程序会自动新建）
@@ -53,7 +53,7 @@ def save_to_csv(df: pd.DataFrame, symbol: str, output_dir: str = "data") -> None
     # 🌟 核心保证：直接对整体 df 进行导出，不加任何列过滤
     # index_label="date" 会把行索引在 CSV 中命名为 "date" 列，且最右侧会动态长出回测的所有列
     df.to_csv(file_path, index_label="date")
-    print(f"💾 [数据存储] {symbol} 终极数字化资产矩阵已安全导入: {file_path}")
+    print(f"[数据存储] {symbol} 终极数字化资产矩阵已安全导入: {file_path}")
 
 # ==========================================
 # 本地测试模块（独立验证清洗与存储）

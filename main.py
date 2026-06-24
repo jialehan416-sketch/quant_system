@@ -4,7 +4,9 @@ from src.data_fetcher import fetch_daily_data
 from src.data_processor import clean_and_format, save_to_csv
 from src.data_strategy import calculate_indicators, generate_signals
 from src.data_backtester import run_backtest, print_performance_summary
+from src.data_visualizer import plot_equity_curve 
 DATA_DIR = "data"
+REPORT_DIR = "reports"
 def get_user_config():
     #交互方式获取用户输入的API Key和股票代码，并进行基本的输入验证和清洗
     print("\n" + "=" * 50)
@@ -63,6 +65,9 @@ def main():
 
         #全量数字资产矩阵落盘 (CSV 账本)
         save_to_csv(df_backtested, symbol, output_dir=DATA_DIR)
+
+        # 绘制并保存资产曲线图
+        plot_equity_curve(df_backtested, symbol, output_dir=REPORT_DIR)
 
         if index < total_stocks - 1:
             wait_seconds = 15
