@@ -1,44 +1,42 @@
 import pandas as pd
-import numpy as np
+
 def run_backtest(df: pd.DataFrame, initial_capital: float = 100000.0) -> pd.DataFrame:
-    if df.empty or 'signal' not in df.columns or 'position' not in df.columns:
-        print("[回测引擎] 缺失必要信号或持仓状态列，拒绝运行回测。")
+    if df is None or df.empty or 'position' not in df.columns:
         return df
-    df_back = df.copy()
-    df_back['market_return'] = df_back['close'].pct_change()
-    df_back['strategy_return'] = df_back['position'].shift(1) * df_back['market_return']
-    df_back['cum_market_return'] = (1 + df_back['market_return'].fillna(0)).cumprod() - 1
-    df_back['cum_strategy_return'] = (1 + df_back['strategy_return'].fillna(0)).cumprod() - 1
-    df_back['portfolio_value'] = initial_capital * (1 + df_back['cum_strategy_return'])
-    return df_back
+        
+    df_bt = df.copy()
+    
+    # 计算每日股票本身的涨跌幅
+    df_bt['pct_change'] = df_bt['close'].pct_change().fillna(0.0)
+    
+    # 策略的每日收益率 = 昨天的持仓状态 * 今天的股票涨跌幅
+    df_bt['strategy_return'] = df_bt['position'].shift(1).fillna(0.0) * df_bt['pct_change']
+    
+    # 计算累计动态权益曲线
+    df_bt['equity_curve'] = (1.0 + df_bt['strategy_return']).cumprod() * initial_capital
+    df_bt['total_returns'] = (df_bt['equity_curve'] / initial_capital) - 1.0
+    
+    return df_bt
 
 def print_performance_summary(df: pd.DataFrame):
-    if df.empty or 'cum_strategy_return' not in df.columns:
-        print("[绩效报告] 缺失回测收益数据，无法生成报告。")
+    """
+    在控制台打印核心战报 KPI
+    """
+    if df is None or df.empty or 'equity_curve' not in df.columns:
         return
+        
+    total_return = df['total_returns'].iloc[-1] * 100
     
-    final_strategy_ret = df['cum_strategy_return'].iloc[-1]
-    final_market_ret = df['cum_market_return'].iloc[-1]
-    trade_count = (df['signal'] != 0).sum()
-    print("\n" + " 量化策略历史回测绩效报告 ")
-    print("-" * 50)
-    print(f"基准大盘（买入持有）总收益率: {final_market_ret * 100:.2f}%")
-    print(f"双均线交叉策略总收益率:       {final_strategy_ret * 100:.2f}%")
-    print(f"策略历史总调仓触发次数:        {trade_count} 次")
-    if final_strategy_ret > final_market_ret:
-        print("恭喜！该策略成功击败基准大盘，斩获超额收益！")
-    else:
-        print("警告：该策略未跑赢大盘，可能存在均线滞后或震荡市“反复挨打”的现象。")
+    # 计算最大回撤 (Drawdown)
+    equity = df['equity_curve']
+    max_equity = equity.cummax()
+    drawdown = (equity - max_equity) / max_equity
+    max_drawdown = drawdown.min() * 100
     
-# 本地测试沙盒（模拟运行）
-if __name__ == "__main__":
-    print("--- 开始运行回测引擎本地离线验证 ---")
-    mock_data = {
-        'close': [100, 101, 102, 104, 106, 108, 107, 105, 103, 101, 99, 98],
-        'position': [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0],
-        'signal': [0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0]
-    }
-    dates = pd.date_range(start="2026-06-01", periods=12)
-    test_df = pd.DataFrame(mock_data, index=dates)
-    res_df = run_backtest(test_df)
-    print_performance_summary(res_df)
+    print("\n" + "🏁" + " 策略回测清算报告 " + "🏁")
+    print(f"   -> 测试时间跨度: {df.index[0].strftime('%Y-%m-%d')} 至 {df.index[-1].strftime('%Y-%m-%d')}")
+    print(f"   -> 初始注入本金: ${df['equity_curve'].iloc[0]:,.2f}")
+    print(f"   -> 期末资产总值: ${df['equity_curve'].iloc[-1]:,.2f}")
+    print(f"   -> 策略累计收益: {total_return:+.2f}%")
+    print(f"   -> 期间最大回撤: {max_drawdown:.2f}%")
+    print("="*30)
