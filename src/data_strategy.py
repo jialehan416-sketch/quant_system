@@ -1,162 +1,210 @@
-import pandas as pd
+import os
+import random
 import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import StandardScaler
+from src.logger import logger
 
-def calculate_indicators(df: pd.DataFrame, short_window: int = 5, long_window: int = 10, 
-                         trend_window: int = 60, rsi_window: int = 14,
-                         macd_fast: int = 12, macd_slow: int = 26, macd_signal: int = 9,
-                         bb_window: int = 20, bb_std: float = 2.0,
-                         kdj_window: int = 9, atr_window: int = 14) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
+# ==========================================
+# 1. DQN 深度 Q 网络架构
+# ==========================================
+class QNetwork(nn.Module):
+    def __init__(self, input_dim, action_dim=2):
+        super(QNetwork, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, action_dim)
+        )
         
-    df_feat = df.copy() 
-    
-    # 均线族
-    df_feat['short_ma'] = df_feat['close'].rolling(window=int(short_window)).mean()
-    df_feat['long_ma'] = df_feat['close'].rolling(window=int(long_window)).mean()
-    df_feat['trend_ma'] = df_feat['close'].rolling(window=int(trend_window)).mean()
-    
-    # RSI 动量
-    delta = df_feat['close'].diff()
-    gain, loss = delta.copy(), delta.copy()
-    gain[gain < 0] = 0.0
-    loss[loss > 0] = 0.0
-    loss = abs(loss)
-    avg_gain = gain.rolling(window=int(rsi_window), min_periods=int(rsi_window)).mean()
-    avg_loss = loss.rolling(window=int(rsi_window), min_periods=int(rsi_window)).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    df_feat['rsi'] = 100 - (100 / (1 + rs))
-    df_feat['rsi'] = df_feat['rsi'].fillna(50)  
-    
-    # MACD
-    df_feat['macd_ema_fast'] = df_feat['close'].ewm(span=int(macd_fast), adjust=False).mean()
-    df_feat['macd_ema_slow'] = df_feat['close'].ewm(span=int(macd_slow), adjust=False).mean()
-    df_feat['macd_diff'] = df_feat['macd_ema_fast'] - df_feat['macd_ema_slow']
-    df_feat['macd_dea'] = df_feat['macd_diff'].ewm(span=int(macd_signal), adjust=False).mean()
-    df_feat['macd_hist'] = df_feat['macd_diff'] - df_feat['macd_dea']
-    
-    # 布林带
-    df_feat['bb_mid'] = df_feat['close'].rolling(window=int(bb_window)).mean()
-    df_feat['bb_std'] = df_feat['close'].rolling(window=int(bb_window)).std()
-    df_feat['bb_upper'] = df_feat['bb_mid'] + (bb_std * df_feat['bb_std'])
-    df_feat['bb_lower'] = df_feat['bb_mid'] - (bb_std * df_feat['bb_std'])
-    
-    # KDJ
-    low_min = df_feat['low'].rolling(window=int(kdj_window)).min()
-    high_max = df_feat['high'].rolling(window=int(kdj_window)).max()
-    rsv = (df_feat['close'] - low_min) / (high_max - low_min).replace(0, np.nan) * 100
-    df_feat['kdj_k'] = rsv.ewm(com=2, adjust=False).mean()
-    df_feat['kdj_d'] = df_feat['kdj_k'].ewm(com=2, adjust=False).mean()
-    df_feat['kdj_j'] = 3 * df_feat['kdj_k'] - 2 * df_feat['kdj_d']
-    
-    # ATR
-    high_low = df_feat['high'] - df_feat['low']
-    high_close = (df_feat['high'] - df_feat['close'].shift(1)).abs()
-    low_close = (df_feat['low'] - df_feat['close'].shift(1)).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df_feat['atr'] = tr.rolling(window=int(atr_window)).mean()
-    
-    return df_feat
+    def forward(self, x):
+        return self.network(x)
 
-def generate_signals(df: pd.DataFrame, enabled_factors: dict) -> pd.DataFrame:
-    if df.empty:
-        return df
+
+# ==========================================
+# 2. 经验回放缓冲区
+# ==========================================
+class ReplayBuffer:
+    def __init__(self, capacity=5000):
+        self.buffer = []
+        self.capacity = capacity
         
-    df_sig = df.copy()
-    df_sig['position'] = 0.0
-    df_sig['signal'] = 0.0
-    
-    # 全因子防御性卡口检查：如果用户开启了某因子，但数据列不存在，强制关闭该因子
-    for factor, col in [('MA','short_ma'), ('TREND','trend_ma'), ('RSI','rsi'), ('MACD','macd_hist'), ('BB','bb_upper'), ('KDJ','kdj_k'), ('ATR','atr')]:
-        if enabled_factors.get(factor, False) and col not in df_sig.columns:
-            enabled_factors[factor] = False
-            
-    # 全空防御
-    if not any(enabled_factors.values()):
-        print("[系统警告] 你关闭了所有策略因子！系统将保持绝对空仓观望。")
-        return df_sig
+    def push(self, state, action, reward, next_state, done):
+        if len(self.buffer) >= self.capacity:
+            self.buffer.pop(0)
+        self.buffer.append((state, action, reward, next_state, done))
         
-    # 底层历史平移项准备
-    p_short1, p_short2 = df_sig['short_ma'].shift(1), df_sig['short_ma'].shift(2)
-    p_long1, p_long2 = df_sig['long_ma'].shift(1), df_sig['long_ma'].shift(2)
-    p_k1, p_k2 = df_sig['kdj_k'].shift(1), df_sig['kdj_k'].shift(2)
-    p_d1, p_d2 = df_sig['kdj_d'].shift(1), df_sig['kdj_d'].shift(2)
-    p_close1 = df_sig['close'].shift(1)
-    p_trend1 = df_sig['trend_ma'].shift(1)
-    p_rsi1 = df_sig['rsi'].shift(1)
-    p_macd_hist1 = df_sig['macd_hist'].shift(1)
-    p_bb_upper1 = df_sig['bb_upper'].shift(1)
-    p_bb_mid1 = df_sig['bb_mid'].shift(1)
-    p_atr1 = df_sig['atr'].shift(1)
+    def sample(self, batch_size):
+        return random.sample(self.buffer, batch_size)
+        
+    def __len__(self):
+        return len(self.buffer)
+
+
+# ==========================================
+# 3. 底层技术指标特征原材料计算模块（保持不变）
+# ==========================================
+from src.indicators.factory import apply_all_indicators
+from src.logger import logger
+
+def generate_signals(df, enabled_factors):
+    # 彻底解耦：指标计算被完全剥离到独立模块
+    try:
+        df_signals = apply_all_indicators(df.copy())
+        logger.info("技术指标特征工程计算成功。")
+    except Exception as e:
+        logger.error(f"特征计算失败: {e}")
+        return df # 返回原始数据或处理错误
     
-    current_position = 0.0
-    highest_close_since_entry = 0.0
-    positions, signals = [], []
+    # ... 后续 DQN 决策逻辑保持不变 ...
+# ==========================================
+# 4. DRL 强化学习自主信号生成引擎 (纯净重塑版)
+# ==========================================
+def generate_signals(df, enabled_factors, rolling_window=40, top_q=0.82, bottom_q=0.18):
+    df_signals = df.copy()
     
-    for idx in range(len(df_sig)):
-        if idx < 2:
-            positions.append(0.0)
-            signals.append(0.0)
-            continue
+    #核心突破：更换知识库文件名，强制 AI 摆脱旧世界的“非理性硬扛”记忆，重新做人
+    MODEL_FILE = "quant_brain_dqn_v3_pure.pth"
+    
+    factor_map = {
+        'MA': ['feat_ma_ratio', 'feat_ma_trend'],
+        'TREND': ['feat_trend_ratio'],
+        'RSI': ['feat_rsi'],
+        'MACD': ['feat_macd'],
+        'BB': ['feat_bb_pos'],
+        'KDJ': ['feat_kdj'],
+        'ATR': ['feat_atr_ratio']
+    }
+    
+    feature_cols = []
+    for code, is_enabled in enabled_factors.items():
+        if is_enabled and code in factor_map:
+            feature_cols.extend(factor_map[code])
+    if not feature_cols:
+        feature_cols = ['feat_ma_ratio']
+        
+    df_signals['next_ret'] = df_signals['close'].pct_change().shift(-1)
+    df_env = df_signals.dropna(subset=feature_cols + ['next_ret']).copy()
+    
+    if len(df_env) < 50:
+        df_signals['position'] = 0
+        df_signals['signal'] = 0
+        return df_signals
+        
+    X = df_env[feature_cols].values
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    next_returns = df_env['next_ret'].values
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = QNetwork(input_dim=len(feature_cols), action_dim=2).to(device)
+    
+    if os.path.exists(MODEL_FILE):
+        try:
+            model.load_state_dict(torch.load(MODEL_FILE, map_location=device))
+            logger.info(f"[清爽传承] 读取 V3 纯净择时记忆库...")
+        except Exception as e:
+            logger.warning(f"记忆读取失败，全新开天辟地。")
+    else:
+        logger.info("[白纸状态] 已强制粉碎旧记忆钢印！从零构建具备风控灵魂的新生量化大脑！")
+        
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+    criterion = nn.MSELoss()
+    memory = ReplayBuffer(capacity=5000)
+    
+    #优化后的学习配置
+    num_episodes = 40       # 提升到 40 轮，让从零开始的大脑学得更透彻
+    batch_size = 64
+    gamma = 0.95            
+    epsilon = 0.4           # 加大探索率，逼迫它多去尝试“空仓”过夜
+    real_friction_cost = 0.0008 # 工业级真实摩擦总和 (万三佣金 + 万五滑点)
+    
+    model.train()
+    for episode in range(num_episodes):
+        last_action = 0  
+        
+        for t in range(len(X_scaled) - 1):
+            state = X_scaled[t]
+            next_state = X_scaled[t+1]
             
-        # 1.动态构建开仓触发器 (MA 或 KDJ 产生金叉)
-        # 如果均开启，任意一个金叉即可触发；如果均未开启，则默认允许触发（完全靠过滤因子控制）
-        has_trigger_defined = enabled_factors.get('MA', False) or enabled_factors.get('KDJ', False)
-        if has_trigger_defined:
-            ma_gold = (p_short1.iloc[idx] > p_long1.iloc[idx]) and (p_short2.iloc[idx] <= p_long2.iloc[idx]) if enabled_factors['MA'] else False
-            kdj_gold = (p_k1.iloc[idx] > p_d1.iloc[idx]) and (p_k2.iloc[idx] <= p_d2.iloc[idx]) if enabled_factors['KDJ'] else False
-            trigger_buy = ma_gold or kdj_gold
-        else:
-            trigger_buy = True 
-
-        # 2.动态构建开仓过滤器 (必须全部通过 AND 校验)
-        filter_pass = True
-        if enabled_factors.get('TREND', False) and not (p_close1.iloc[idx] > p_trend1.iloc[idx]):
-            filter_pass = False
-        if enabled_factors.get('RSI', False) and not (p_rsi1.iloc[idx] < 65):
-            filter_pass = False
-        if enabled_factors.get('MACD', False) and not (p_macd_hist1.iloc[idx] > 0):
-            filter_pass = False
-        if enabled_factors.get('BB', False) and not (p_close1.iloc[idx] < p_bb_upper1.iloc[idx]):
-            filter_pass = False
-
-        # 3.动态构建平仓/止损触发器 (任何一个触发 OR 校验)
-        trigger_sell = False
-        if enabled_factors.get('MA', False) and ((p_short1.iloc[idx] < p_long1.iloc[idx]) and (p_short2.iloc[idx] >= p_long2.iloc[idx])):
-            trigger_sell = True
-        if enabled_factors.get('KDJ', False) and ((p_k1.iloc[idx] < p_d1.iloc[idx]) and (p_k2.iloc[idx] >= p_d2.iloc[idx])):
-            trigger_sell = True
-        if enabled_factors.get('TREND', False) and (p_close1.iloc[idx] < p_trend1.iloc[idx]):
-            trigger_sell = True
-        if enabled_factors.get('RSI', False) and (p_rsi1.iloc[idx] > 80):
-            trigger_sell = True
-        if enabled_factors.get('BB', False) and (p_close1.iloc[idx] < p_bb_mid1.iloc[idx]):
-            trigger_sell = True
+            if random.random() < epsilon:
+                action = random.choice([0, 1])
+            else:
+                with torch.no_grad():
+                    state_t = torch.tensor(state, dtype=torch.float32).to(device)
+                    q_values = model(state_t)
+                    action = torch.argmax(q_values).item()
             
-        # ATR 追踪止损风控
-        if current_position == 1.0:
-            highest_close_since_entry = max(highest_close_since_entry, p_close1.iloc[idx])
-            if enabled_factors.get('ATR', False) and (p_close1.iloc[idx] < (highest_close_since_entry - 3.0 * p_atr1.iloc[idx])):
-                trigger_sell = True
-
-        # 4.状态机流转执行
-        signal = 0.0
-        if current_position == 0.0:
-            if trigger_buy and filter_pass:
-                current_position = 1.0
-                signal = 1.0
-                highest_close_since_entry = p_close1.iloc[idx]
-        elif current_position == 1.0:
-            if trigger_sell:
-                current_position = 0.0
-                signal = -1.0
-                highest_close_since_entry = 0.0
+            # ---- 奖励函数重组：精确定向狙击暴跌 ----
+            action_return = next_returns[t] if action == 1 else 0.0
+            benchmark_return = next_returns[t]
+            
+            # 1. 超额阿尔法收益基础分
+            alpha_reward = action_return - benchmark_return
+            
+            # 2. 核心死刑项：单日吃跌致命惩罚
+            # 如果明天市场大跌（<0），而你作死选择持仓（action=1），直接施加极度严厉的负分铁拳！
+            if next_returns[t] < 0 and action == 1:
+                downside_penalty = abs(next_returns[t]) * 45.0  
+            else:
+                downside_penalty = 0.0
                 
-        positions.append(current_position)
-        signals.append(signal)
-        
-    df_sig['position'] = positions
-    df_sig['signal'] = signals
-    df_sig['signal'] = df_sig['signal'].astype(int)
+            # 3. 换仓摩擦成本惩罚
+            friction_penalty = real_friction_cost if action != last_action else 0.0
+            
+            # 综合积分公式
+            reward = (20.0 * alpha_reward) - downside_penalty - (4.0 * friction_penalty)
+            
+            memory.push(state, action, reward, next_state, False)
+            last_action = action
+            
+            if len(memory) > batch_size:
+                transitions = memory.sample(batch_size)
+                b_state, b_action, b_reward, b_next_state, _ = zip(*transitions)
+                
+                b_state = torch.tensor(np.array(b_state), dtype=torch.float32).to(device)
+                b_action = torch.tensor(b_action, dtype=torch.long).unsqueeze(1).to(device)
+                b_reward = torch.tensor(b_reward, dtype=torch.float32).unsqueeze(1).to(device)
+                b_next_state = torch.tensor(np.array(b_next_state), dtype=torch.float32).to(device)
+                
+                current_q = model(b_state).gather(1, b_action)
+                with torch.no_grad():
+                    max_next_q = model(b_next_state).max(1)[0].unsqueeze(1)
+                    target_q = b_reward + gamma * max_next_q
+                    
+                loss = criterion(current_q, target_q)
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 稳定神经元
+                optimizer.step()
+                
+        epsilon = max(0.01, epsilon * 0.90)
+
+    torch.save(model.state_dict(), MODEL_FILE)
+    logger.info(f"[固化大脑] 带有严苛风控基因的全新矩阵已存盘。")
+
+    # 4. 实战推演与核心时间对齐
+    model.eval()
+    all_features = df_signals[feature_cols].fillna(0.0).values
+    all_features_scaled = scaler.transform(all_features)
     
-    return df_sig
+    raw_actions = []
+    with torch.no_grad():
+        for s in all_features_scaled:
+            s_t = torch.tensor(s, dtype=torch.float32).to(device)
+            action = torch.argmax(model(s_t)).item()
+            raw_actions.append(action)
+            
+    # 关键修复：使用 .shift(1) 将 AI 的动作完美的向后对齐一天！
+    # 确保第 t 天算出来的精妙决策，被精准地执行在第 t+1 天的实盘交易里，消除时滞造成的全盘崩盘。
+    aligned_positions = pd.Series(raw_actions, index=df_signals.index).shift(1).fillna(0).astype(int)
+    
+    df_signals['position'] = aligned_positions
+    df_signals['signal'] = aligned_positions
+    
+    return df_signals

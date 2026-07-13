@@ -1,0 +1,22 @@
+# 忽略虚拟环境文件夹
+.venv/
+venv/
+env/
+
+# 忽略临时文件
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 忽略训练生成的权重或数据
+quant_brain_dqn.pth
+data/AAPL_backtest_ledger.csv
+reports/*.png
+
+# 忽略 .env 文件
+.env
+
+# 忽略其他的敏感/虚拟环境文件
+.venv/
+__pycache__/
+*.pyc

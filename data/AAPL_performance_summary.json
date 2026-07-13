@@ -1,0 +1,13 @@
+{
+    "metadata": {
+        "symbol": "AAPL",
+        "total_trading_days": 1254,
+        "data_engine_version": "yfinance_neural_v2",
+        "creation_time": "2026-07-07 16:43:45"
+    },
+    "performance_metrics": {
+        "strategy_total_return_pct": 120.42783073563416,
+        "final_portfolio_value_usd": 220427.83073563417,
+        "market_buy_and_hold_return_pct": 121.87073850993455
+    }
+}

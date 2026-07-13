@@ -1,0 +1,40 @@
+# ==========================================
+# 全局系统配置中心 (工业级解耦版)
+# ==========================================
+
+# 路径管理
+DATA_DIR: "data"
+REPORT_DIR: "reports"
+
+# 基础技术指标窗体参数 (由各指标插件动态读取)
+STRATEGY_PARAMS:
+  short_window: 5
+  long_window: 10
+  trend_window: 60
+  rsi_window: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_window: 20
+  bb_std: 2.0
+  kdj_window: 9
+  atr_window: 14
+
+# 强化学习脑部兼容性控制参数
+ADAPTIVE_PARAMS:
+  rolling_window: 40
+  top_q: 0.82
+  bottom_q: 0.18
+
+# 回测引擎核心账本参数
+BACKTEST_PARAMS:
+  initial_capital: 100000.0
+  commission: 0.0003     # 单边交易佣金: 0.03%
+  slippage: 0.0005       # 单边市场滑点: 0.05%
+
+# 默认审计与观测股票池
+DEFAULT_STOCKS:
+  - "TSLA"
+  - "AAPL"
+  - "NVDA"
+  - "MSFT"
