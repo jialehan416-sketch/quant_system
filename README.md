@@ -41,9 +41,9 @@ python main.py --mode visualize
 
 # 以非交互模式一键跑通 1 至 6 步全套管线
 python main.py --mode all
-模块级原子化独立运行指南除了通过 main.py 调度外，系统内的五个核心业务组件均已内置标准的独立执行入口。您可以彻底绕过主控制流，在项目根目录下通过直调子模块脚本的方式实现秒级局部 Debug：独立下载行情：python src/data_fetcher.py
-该操作将只请求网络，下载全局配置中指定资产的5年历史日线数据，并刷新 data/{symbol}_raw.json 文件。独立执行清洗与特征工程：python src/data_processor.py
-该操作读取现有的 _raw.json 文件，强转价格类型为 float64 并将成交量强转为 Int64，完成 NaN 清理后自动调用工厂生成指标矩阵，刷新 _cleaned.csv 与 _indicators.csv。独立训练/演练交易信号：python src/data_strategy.py
-该操作读取现有的 _indicators.csv，直接启动包含 64 和 32 个神经元的全连接双层 QNetwork 进行 40 轮强化试错进化，结合单日吃跌惩罚与摩擦成本控制函数刷新择时信号 _signals.csv。独立微调回测表现：python src/data_backtester.py
-该操作读取现有的 _signals.csv，使用 NumPy 底层数组全仓模拟买卖行为，扣除双边佣金与滑点，在控制台输出 Sharpe 比率、年化收益率、最大回撤、预测准确率等华尔街标准绩效报告，并刷新 _backtest_ledger.csv 账本。独立修改样式并渲染图表：python src/data_visualizer.py
+模块级原子化独立运行指南除了通过 main.py 调度外，系统内的五个核心业务组件均已内置标准的独立执行入口。您可以彻底绕过主控制流，在项目根目录下通过直调子模块脚本的方式实现秒级局部 Debug：1. 独立下载行情python src/data_fetcher.py
+该操作将只请求网络，下载全局配置中指定资产的 5 年历史日线数据，并刷新 data/{symbol}_raw.json 文件。2. 独立执行清洗与特征工程python src/data_processor.py
+该操作读取现有的 _raw.json 文件，强转价格类型为 float64 并将成交量强转为 Int64，完成 NaN 清理后自动调用工厂生成指标矩阵，刷新 _cleaned.csv 与 _indicators.csv。3. 独立训练/演练交易信号python src/data_strategy.py
+该操作读取现有的 _indicators.csv，直接启动包含 64 和 32 个神经元的全连接双层 QNetwork 进行 40 轮强化试错进化，结合单日吃跌惩罚与摩擦成本控制函数刷新择时信号 _signals.csv。4. 独立微调回测表现python src/data_backtester.py
+该操作读取现有的 _signals.csv，使用 NumPy 底层数组全仓模拟买卖行为，扣除双边佣金与滑点，在控制台输出 Sharpe 比率、年化收益率、最大回撤、预测准确率等华尔街标准绩效报告，并刷新 _backtest_ledger.csv 账本。5. 独立修改样式并渲染图表python src/data_visualizer.py
 该操作读取现有的 _backtest_ledger.csv，利用 seaborn-v0_8-darkgrid 风格套件独立绘制出包含自适应策略收益、基准对比收益以及神经网络上涨预测概率的多子图全景全中文审计图，直接更新 reports/{symbol}_equity_curve.png。核心算法与风控机制细节DQN 记忆存盘与传承：智能体在决策阶段会自动尝试从硬盘读取 quant_brain_dqn_v3_pure.pth 的历史权重矩阵，实现跨资产经验的清爽传承或增量进化。精准消除未来函数：智能体的动作输出被严格执行了 .shift(1) 顺延一日处理，确保第 $t$ 天计算的收盘决策被精准地在第 $t+1$ 天执行，完全杜绝回测中的时滞作弊现象。定向狙击暴跌奖励函数：在强化学习奖励设置中加入了严苛的死刑项机制（单日跌幅乘以权重 45.0 的超额负分铁拳），强迫大脑在市场出现崩盘前夕产生空仓过夜的本能风控灵魂。双轨制数据审计：系统在落盘时不仅提供包含了每日现金、持股明细、策略综合净值的全量 CSV 对账单，同时原子化地提炼出高价值的轻量级绩效 snapshot JSON 快照供前端或者上层应用直接读取解析。
