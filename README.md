@@ -38,6 +38,8 @@ quant_system/
 ### 1. 安装基础依赖
 
 克隆项目至本地后，请确保 Python 环境满足要求，并在根目录下执行依赖安装：
+pip install pyyaml
+pip install python-dotenv
 
 ```bash
 pip install -r requirements.txt
